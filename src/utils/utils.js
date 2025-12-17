@@ -1,7 +1,7 @@
 import config from '../config/config.js';
 import tokenManager from '../auth/token_manager.js';
 import { generateRequestId } from './idGenerator.js';
-import { saveBase64Image } from './imageStorage.js';
+import os from 'os';
 import { getReasoningSignature, getToolSignature } from './thoughtSignatureCache.js';
 import { setToolNameMapping } from './toolNameCache.js';
 
@@ -58,64 +58,6 @@ function extractImagesFromContent(content) {
   }
 
   return result;
-}
-
-// 尝试从工具调用返回的 JSON 字符串中提取图片，
-// 保存到本地图床并将 data 替换为 URL，同时附带 markdown 字段。
-function transformToolOutputForImages(rawContent) {
-  if (!rawContent) return rawContent;
-
-  let obj = rawContent;
-  let isString = false;
-
-  if (typeof rawContent === 'string') {
-    isString = true;
-    try {
-      obj = JSON.parse(rawContent);
-    } catch {
-      // 不是 JSON，直接返回原始内容
-      return rawContent;
-    }
-  }
-
-  if (!obj || typeof obj !== 'object') {
-    return rawContent;
-  }
-
-  const response = obj.response;
-  const contents = response?.content;
-  if (!Array.isArray(contents)) {
-    return rawContent;
-  }
-
-  const markdownBlocks = [];
-
-  for (const item of contents) {
-    if (item && item.type === 'image' && item.data && item.mimeType) {
-      try {
-        const url = saveBase64Image(item.data, item.mimeType);
-        // 去掉大体积的 base64，改为 URL
-        delete item.data;
-        item.url = url;
-
-        const alt = item.alt || 'image';
-        markdownBlocks.push(`![${alt}](${url})`);
-      } catch {
-        // 单张图片保存失败时忽略，继续处理其它内容
-      }
-    }
-  }
-
-  if (markdownBlocks.length > 0) {
-    const markdown = markdownBlocks.join('\n\n');
-    if (typeof obj.markdown === 'string' && obj.markdown.trim()) {
-      obj.markdown += `\n\n${markdown}`;
-    } else {
-      obj.markdown = markdown;
-    }
-  }
-
-  return isString ? JSON.stringify(obj) : obj;
 }
 function handleUserMessage(extracted, antigravityMessages){
   antigravityMessages.push({
@@ -240,17 +182,12 @@ function handleToolCall(message, antigravityMessages){
   }
   
   const lastMessage = antigravityMessages[antigravityMessages.length - 1];
-
-  // 尝试从工具输出中提取并持久化图片，返回值仍保持为字符串/原始格式，
-  // 但内部的图片 data 会被替换为图床 URL，并附带 markdown 字段。
-  const transformedContent = transformToolOutputForImages(message.content);
-
   const functionResponse = {
     functionResponse: {
       id: message.tool_call_id,
       name: functionName,
       response: {
-        output: transformedContent
+        output: message.content
       }
     }
   };
@@ -533,8 +470,21 @@ function prepareImageRequest(requestBody) {
 
   return requestBody;
 }
+
+function getDefaultIp(){
+  const interfaces = os.networkInterfaces();
+  for (const iface of Object.values(interfaces)){
+    for (const inter of iface){
+      if (inter.family === 'IPv4' && !inter.internal){
+        return inter.address;
+      }
+    }
+  }
+  return '127.0.0.1';
+}
 export{
   generateRequestId,
   generateRequestBody,
-  prepareImageRequest
+  prepareImageRequest,
+  getDefaultIp
 }
