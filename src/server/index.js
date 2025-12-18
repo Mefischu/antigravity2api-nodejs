@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { generateAssistantResponse, generateAssistantResponseNoStream, getAvailableModels, generateImageForSD, closeRequester } from '../api/client.js';
-import { generateRequestBody, prepareImageRequest } from '../utils/utils.js';
+import { generateRequestBody, generateGeminiRequestBody, prepareImageRequest } from '../utils/utils.js';
 import logger from '../utils/logger.js';
 import config from '../config/config.js';
 import tokenManager from '../auth/token_manager.js';
@@ -202,6 +202,72 @@ const buildOpenAIErrorPayload = (error, statusCode) => {
   };
 };
 
+// Gemini 兼容错误响应构造
+const buildGeminiErrorPayload = (error, statusCode) => {
+  // 尝试解析原始错误信息
+  let message = error.message || 'Internal server error';
+  if (error.isUpstreamApiError && error.rawBody) {
+    try {
+      const raw = typeof error.rawBody === 'string' ? JSON.parse(error.rawBody) : error.rawBody;
+      message = raw.error?.message || raw.message || message;
+    } catch {}
+  }
+
+  return {
+    error: {
+      code: statusCode,
+      message: message,
+      status: "INTERNAL" // 简单映射，实际可根据 statusCode 细化
+    }
+  };
+};
+
+// Gemini 响应构建工具
+const createGeminiResponse = (content, reasoning, toolCalls, finishReason, usage) => {
+  const parts = [];
+  if (reasoning) {
+    parts.push({ text: reasoning, thought: true });
+  }
+  if (content) {
+    parts.push({ text: content });
+  }
+  if (toolCalls && toolCalls.length > 0) {
+    toolCalls.forEach(tc => {
+      try {
+        parts.push({
+          functionCall: {
+            name: tc.function.name,
+            args: JSON.parse(tc.function.arguments)
+          }
+        });
+      } catch (e) {
+        // 忽略解析错误
+      }
+    });
+  }
+
+  const response = {
+    candidates: [{
+      content: {
+        parts: parts,
+        role: "model"
+      },
+      finishReason: finishReason || "STOP",
+      index: 0
+    }]
+  };
+
+  if (usage) {
+    response.usageMetadata = {
+      promptTokenCount: usage.prompt_tokens,
+      candidatesTokenCount: usage.completion_tokens,
+      totalTokenCount: usage.total_tokens
+    };
+  }
+  
+  return response;
+};
+
 app.use(cors());
 app.use(express.json({ limit: config.security.maxRequestSize }));
 
@@ -396,6 +462,153 @@ app.post('/v1/chat/completions', async (req, res) => {
     const errorPayload = buildOpenAIErrorPayload(error, statusCode);
     return res.status(statusCode).json(errorPayload);
   }
+});
+
+// Gemini 模型列表格式转换
+const convertToGeminiModelList = (openaiModels) => {
+  const models = openaiModels.data.map(model => ({
+    name: `models/${model.id}`,
+    version: "001",
+    displayName: model.id,
+    description: "Imported model",
+    inputTokenLimit: 32768, // 默认值
+    outputTokenLimit: 8192, // 默认值
+    supportedGenerationMethods: ["generateContent", "countTokens"],
+    temperature: 0.9,
+    topP: 1.0,
+    topK: 40
+  }));
+  return { models };
+};
+
+// Gemini API 路由
+app.get('/v1beta/models', async (req, res) => {
+  try {
+    const openaiModels = await getAvailableModels();
+    const geminiModels = convertToGeminiModelList(openaiModels);
+    res.json(geminiModels);
+  } catch (error) {
+    logger.error('获取模型列表失败:', error.message);
+    res.status(500).json({ error: { code: 500, message: error.message, status: "INTERNAL" } });
+  }
+});
+
+app.get('/v1beta/models/:model', async (req, res) => {
+  try {
+    const modelId = req.params.model.replace(/^models\//, '');
+    const openaiModels = await getAvailableModels();
+    const model = openaiModels.data.find(m => m.id === modelId);
+    
+    if (model) {
+      const geminiModel = {
+        name: `models/${model.id}`,
+        version: "001",
+        displayName: model.id,
+        description: "Imported model",
+        inputTokenLimit: 32768,
+        outputTokenLimit: 8192,
+        supportedGenerationMethods: ["generateContent", "countTokens"],
+        temperature: 0.9,
+        topP: 1.0,
+        topK: 40
+      };
+      res.json(geminiModel);
+    } else {
+      res.status(404).json({ error: { code: 404, message: `Model ${modelId} not found`, status: "NOT_FOUND" } });
+    }
+  } catch (error) {
+    logger.error('获取模型详情失败:', error.message);
+    res.status(500).json({ error: { code: 500, message: error.message, status: "INTERNAL" } });
+  }
+});
+
+const handleGeminiRequest = async (req, res, modelName, isStream) => {
+  try {
+    const token = await tokenManager.getToken();
+    if (!token) {
+      throw new Error('没有可用的token，请运行 npm run login 获取token');
+    }
+
+    const requestBody = generateGeminiRequestBody(req.body, modelName, token);
+    const maxRetries = Number(config.retryTimes || 0);
+    const safeRetries = maxRetries > 0 ? Math.floor(maxRetries) : 0;
+
+    if (isStream) {
+      setStreamHeaders(res);
+      const heartbeatTimer = createHeartbeat(res);
+
+      try {
+        let usageData = null;
+        let hasToolCall = false;
+
+        await with429Retry(
+          () => generateAssistantResponse(requestBody, token, (data) => {
+            if (data.type === 'usage') {
+              usageData = data.usage;
+            } else if (data.type === 'reasoning') {
+              // Gemini 思考内容
+              const chunk = createGeminiResponse(null, data.reasoning_content, null, null, null);
+              writeStreamData(res, chunk);
+            } else if (data.type === 'tool_calls') {
+              hasToolCall = true;
+              // Gemini 工具调用
+              const chunk = createGeminiResponse(null, null, data.tool_calls, null, null);
+              writeStreamData(res, chunk);
+            } else {
+              // 普通文本
+              const chunk = createGeminiResponse(data.content, null, null, null, null);
+              writeStreamData(res, chunk);
+            }
+          }),
+          safeRetries,
+          'gemini.stream '
+        );
+
+        // 发送结束块和 usage
+        const finishReason = hasToolCall ? "STOP" : "STOP"; // Gemini 工具调用也是 STOP
+        const finalChunk = createGeminiResponse(null, null, null, finishReason, usageData);
+        writeStreamData(res, finalChunk);
+
+        clearInterval(heartbeatTimer);
+        endStream(res);
+      } catch (error) {
+        clearInterval(heartbeatTimer);
+        throw error;
+      }
+    } else {
+      // 非流式
+      req.setTimeout(0);
+      res.setTimeout(0);
+
+      const { content, reasoningContent, toolCalls, usage } = await with429Retry(
+        () => generateAssistantResponseNoStream(requestBody, token),
+        safeRetries,
+        'gemini.no_stream '
+      );
+
+      const finishReason = toolCalls.length > 0 ? "STOP" : "STOP";
+      const response = createGeminiResponse(content, reasoningContent, toolCalls, finishReason, usage);
+      res.json(response);
+    }
+  } catch (error) {
+    logger.error('Gemini 请求失败:', error.message);
+    if (res.headersSent) return;
+
+    const statusCode = Number(error.status) || 500;
+    const errorPayload = buildGeminiErrorPayload(error, statusCode);
+    res.status(statusCode).json(errorPayload);
+  }
+};
+
+app.post('/v1beta/models/:model\\:streamGenerateContent', (req, res) => {
+  const modelName = req.params.model;
+  handleGeminiRequest(req, res, modelName, true);
+});
+
+app.post('/v1beta/models/:model\\:generateContent', (req, res) => {
+  const modelName = req.params.model;
+  const isStream = req.query.alt === 'sse';
+  handleGeminiRequest(req, res, modelName, isStream);
 });
 
 const server = app.listen(config.server.port, config.server.host, () => {

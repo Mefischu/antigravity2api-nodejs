@@ -487,9 +487,87 @@ function getDefaultIp(){
   }
   return '127.0.0.1';
 }
+
+function generateGeminiRequestBody(geminiBody, modelName, token){
+  const enableThinking = isEnableThinking(modelName);
+  const actualModelName = modelMapping(modelName);
+  
+  // 深拷贝 body，避免修改原始对象
+  const request = JSON.parse(JSON.stringify(geminiBody));
+  //console.log(JSON.stringify(request,null,2));
+  
+  // 处理 contents 中的 functionCall 和 functionResponse，确保有 id 字段
+  if (request.contents && Array.isArray(request.contents)) {
+    // 第一遍：收集所有 functionCall 的 name -> id 映射
+    const functionCallIds = new Map();
+    request.contents.forEach(content => {
+      if (content.role === 'model' && content.parts && Array.isArray(content.parts)) {
+        content.parts.forEach(part => {
+          if (part.functionCall) {
+            if (!part.functionCall.id) {
+              part.functionCall.id = `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            }
+            // 记录 name -> id 映射
+            functionCallIds.set(part.functionCall.name, part.functionCall.id);
+          }
+        });
+      }
+    });
+    
+    // 第二遍：为 functionResponse 匹配对应的 id
+    request.contents.forEach(content => {
+      if (content.role === 'user' && content.parts && Array.isArray(content.parts)) {
+        content.parts.forEach(part => {
+          if (part.functionResponse && !part.functionResponse.id) {
+            // 尝试从映射中找到对应的 id
+            const matchedId = functionCallIds.get(part.functionResponse.name);
+            part.functionResponse.id = matchedId || `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          }
+        });
+      }
+    });
+  }
+  
+  // 确保 generationConfig 存在
+  if (!request.generationConfig) {
+    request.generationConfig = {};
+  }
+  
+  // 处理思考模型配置
+  if (enableThinking) {
+    const defaultThinkingBudget = config.defaults.thinking_budget ?? 1024;
+    // 如果没有 thinkingConfig，尝试注入
+    if (!request.generationConfig.thinkingConfig) {
+      request.generationConfig.thinkingConfig = {
+        includeThoughts: true,
+        thinkingBudget: defaultThinkingBudget
+      };
+    }
+  }
+  
+  // 强制 candidateCount 为 1
+  request.generationConfig.candidateCount = 1;
+  
+  // 注入 sessionId
+  request.sessionId = token.sessionId;
+  delete request.safetySettings;
+  
+  // 构造 Antigravity 请求体
+  const requestBody = {
+    project: token.projectId,
+    requestId: generateRequestId(),
+    request: request,
+    model: actualModelName,
+    userAgent: "antigravity"
+  };
+  
+  return requestBody;
+}
+
 export{
   generateRequestId,
   generateRequestBody,
+  generateGeminiRequestBody,
   prepareImageRequest,
   getDefaultIp
 }
