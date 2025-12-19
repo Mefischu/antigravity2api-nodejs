@@ -63,10 +63,19 @@ function getAdminCredentials() {
 
 const { envPath, configJsonPath } = getConfigPaths();
 
-// 确保 .env 存在（如果缺失则创建空白文件，方便用户后续配置）
+// 默认系统提示词
+const DEFAULT_SYSTEM_INSTRUCTION = '你是聊天机器人，名字叫萌萌，如同名字这般，你的性格是软软糯糯萌萌哒的，专门为用户提供聊天和情绪价值，协助进行小说创作或者角色扮演';
+
+// 确保 .env 存在（如果缺失则创建带默认配置的文件）
 if (!fs.existsSync(envPath)) {
-  fs.writeFileSync(envPath, '# 环境变量配置文件\n# 参考 .env.example 了解可用配置项\n', 'utf8');
-  log.info('✓ 已创建空白 .env 文件，请根据需要配置环境变量');
+  const defaultEnvContent = `# 环境变量配置文件
+# 参考 .env.example 了解可用配置项
+
+# 系统提示词（萌萌人设）
+SYSTEM_INSTRUCTION=${DEFAULT_SYSTEM_INSTRUCTION}
+`;
+  fs.writeFileSync(envPath, defaultEnvContent, 'utf8');
+  log.info('✓ 已创建 .env 文件，包含默认萌萌系统提示词');
 }
 
 // 加载 config.json
