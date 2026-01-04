@@ -350,8 +350,8 @@ async function showQuotaModal(refreshToken) {
                 <div class="quota-loading">加载中...</div>
             </div>
             <div class="modal-actions">
-                <button class="btn btn-info btn-sm" id="quotaRefreshBtn" onclick="refreshQuotaData()">🔄 刷新</button>
                 <button class="btn btn-secondary btn-sm" onclick="this.closest('.modal').remove()">关闭</button>
+                <button class="btn btn-info btn-sm" id="quotaRefreshBtn" onclick="refreshQuotaData()">🔄 刷新</button>
             </div>
         </div>
     `;

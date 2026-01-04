@@ -75,11 +75,10 @@ function processModelThoughts(content, reasoningSignature, toolSignature) {
     parts[thoughtIndex].thoughtSignature = signatureValue;
     parts.splice(signatureIndex, 1);
   } else if (thoughtIndex !== -1 && signatureIndex === -1) {
-    if (reasoningSignature) {
-      parts[thoughtIndex].thoughtSignature = reasoningSignature;
-    }
+    const fallbackSig = reasoningSignature || toolSignature;
+    if (fallbackSig) parts[thoughtIndex].thoughtSignature = fallbackSig;
   } else if (thoughtIndex === -1) {
-    parts.unshift(createThoughtPart(' ', reasoningSignature));
+    parts.unshift(createThoughtPart(' ', reasoningSignature || toolSignature));
   }
   
   // 收集独立的签名 parts（用于 functionCall）
@@ -100,9 +99,8 @@ function processModelThoughts(content, reasoningSignature, toolSignature) {
         part.thoughtSignature = standaloneSignatures[sigIndex].signature;
         sigIndex++;
       } else {
-        if (toolSignature) {
-          part.thoughtSignature = toolSignature;
-        }
+        const fallbackSig = toolSignature || reasoningSignature;
+        if (fallbackSig) part.thoughtSignature = fallbackSig;
       }
     }
   }

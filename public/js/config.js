@@ -56,7 +56,7 @@ async function loadConfig() {
                 if (form.elements['HOST']) form.elements['HOST'].value = json.server.host || '';
                 if (form.elements['MAX_REQUEST_SIZE']) form.elements['MAX_REQUEST_SIZE'].value = json.server.maxRequestSize || '';
                 if (form.elements['HEARTBEAT_INTERVAL']) form.elements['HEARTBEAT_INTERVAL'].value = json.server.heartbeatInterval || '';
-                if (form.elements['MEMORY_THRESHOLD']) form.elements['MEMORY_THRESHOLD'].value = json.server.memoryThreshold || '';
+                if (form.elements['MEMORY_CLEANUP_INTERVAL']) form.elements['MEMORY_CLEANUP_INTERVAL'].value = json.server.memoryCleanupInterval || '';
             }
             if (json.defaults) {
                 if (form.elements['DEFAULT_TEMPERATURE']) form.elements['DEFAULT_TEMPERATURE'].value = json.defaults.temperature ?? '';
@@ -172,7 +172,7 @@ async function saveConfig(e) {
             else if (key === 'HOST') jsonConfig.server.host = value || undefined;
             else if (key === 'MAX_REQUEST_SIZE') jsonConfig.server.maxRequestSize = value || undefined;
             else if (key === 'HEARTBEAT_INTERVAL') jsonConfig.server.heartbeatInterval = parseInt(value) || undefined;
-            else if (key === 'MEMORY_THRESHOLD') jsonConfig.server.memoryThreshold = parseInt(value) || undefined;
+            else if (key === 'MEMORY_CLEANUP_INTERVAL') jsonConfig.server.memoryCleanupInterval = parseInt(value) || undefined;
             else if (key === 'DEFAULT_TEMPERATURE') jsonConfig.defaults.temperature = parseFloat(value) || undefined;
             else if (key === 'DEFAULT_TOP_P') jsonConfig.defaults.topP = parseFloat(value) || undefined;
             else if (key === 'DEFAULT_TOP_K') jsonConfig.defaults.topK = parseInt(value) || undefined;

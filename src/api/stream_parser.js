@@ -98,6 +98,17 @@ function parseAndEmitStreamChunk(line, state, callback) {
     
     if (parts) {
       for (const part of parts) {
+        if (part.thoughtSignature) {
+          // Gemini 等模型可能只在 functionCall part 上给出 thoughtSignature；
+          // 将其视为本轮“最新签名”，用于后续 functionCall 兜底与下次请求缓存。
+          if (part.thoughtSignature !== state.reasoningSignature) {
+            state.reasoningSignature = part.thoughtSignature;
+            if (state.sessionId && state.model && config.useCachedSignature) {
+              setReasoningSignature(state.sessionId, state.model, part.thoughtSignature);
+            }
+          }
+        }
+
         if (part.thought === true) {
           if (part.thoughtSignature) {
             state.reasoningSignature = part.thoughtSignature;
@@ -117,11 +128,12 @@ function parseAndEmitStreamChunk(line, state, callback) {
           callback({ type: 'text', content: part.text });
         } else if (part.functionCall) {
           const toolCall = convertToToolCall(part.functionCall, state.sessionId, state.model);
-          if (part.thoughtSignature) {
-            toolCall.thoughtSignature = part.thoughtSignature;
+          const sig = part.thoughtSignature || state.reasoningSignature || null;
+          if (sig) {
+            toolCall.thoughtSignature = sig;
             if (state.sessionId && state.model) {
               if (config.useCachedSignature) {
-                setToolSignature(state.sessionId, state.model, part.thoughtSignature);
+                setToolSignature(state.sessionId, state.model, sig);
               }
             }
           }

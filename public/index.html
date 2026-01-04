@@ -299,8 +299,8 @@ html.tab-settings .tab[data-tab="settings"] {
                                         <input type="number" name="HEARTBEAT_INTERVAL" placeholder="15000">
                                     </div>
                                     <div class="form-group compact">
-                                        <label>内存阈值(MB) <span class="help-tip" data-tooltip="超过此值触发GC清理">?</span></label>
-                                        <input type="number" name="MEMORY_THRESHOLD" placeholder="100">
+                                        <label>内存清理间隔(ms) <span class="help-tip" data-tooltip="按固定间隔触发缓存/对象池清理">?</span></label>
+                                        <input type="number" name="MEMORY_CLEANUP_INTERVAL" placeholder="1800000">
                                     </div>
                                 </div>
                                      <div class="form-group compact">
@@ -313,8 +313,8 @@ html.tab-settings .tab[data-tab="settings"] {
                                     </div>
                                 </div>
                                 <div class="config-actions">
-                                    <button type="submit" class="btn btn-success">💾 保存配置</button>
                                     <button type="button" onclick="loadConfig()" class="btn btn-secondary">🔄 重新加载</button>
+                                    <button type="submit" class="btn btn-success">💾 保存配置</button>
                                 </div>
                             </div>
                         </div>
